@@ -1,7 +1,8 @@
 import {Entity, PrimaryGeneratedColumn, Column} from 'typeorm'
+import { Audit } from './audit.entity'
 
 @Entity({name: 'fsm_msg'})
-export class FsmMsg {
+export class FsmMsg extends Audit {
     @PrimaryGeneratedColumn()
     id: number
     @Column()
