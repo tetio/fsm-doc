@@ -29,10 +29,10 @@ export class FsmMsg extends Audit {
     state: string
     @Column()
     reprocessed: boolean
-    @Column({name: 'doc_ref_num'})
+    @Column({name: 'doc_ref_num', nullable: true})
     docRefNum: string
-    @Column({name: 'doc_ref_ver'})
+    @Column({name: 'doc_ref_ver', nullable: true})
     docRefVer: string
-    @Column({name: 'doc_ref_type'})
+    @Column({name: 'doc_ref_type', nullable: true})
     docRefType: string
 }

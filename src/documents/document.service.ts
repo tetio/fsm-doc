@@ -5,18 +5,22 @@ import { FsmDoc } from 'src/entities/fsm-doc.entity';
 
 @Injectable()
 export class DocumentService {
-    constructor(@InjectRepository(FsmDoc) private fsmDocsRepository: Repository<FsmDoc>,) { }
+    constructor(@InjectRepository(FsmDoc) private fsmDocsRepository: Repository<FsmDoc>, ) { }
 
-    async findAll() {
-        return await this.fsmDocsRepository.find() 
+    findAll() {
+        return this.fsmDocsRepository.find()
     }
 
-    async create(doc: FsmDoc) {
-        await this.fsmDocsRepository.save(doc)
+    findByKey(key: string) {
+        return this.fsmDocsRepository.findOneOrFail({ key })
+    }
+
+    create(doc: FsmDoc) {
+        return this.fsmDocsRepository.save(doc)
     }
 
 
-    async getFsmDocs(fsmDoc: FsmDoc): Promise<FsmDoc[]> {
-        return await this.fsmDocsRepository.find()
+    getFsmDocs(fsmDoc: FsmDoc): Promise<FsmDoc[]> {
+        return this.fsmDocsRepository.find()
     }
 }

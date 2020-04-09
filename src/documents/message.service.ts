@@ -7,20 +7,23 @@ import { FsmMsg } from '../entities/fsm-msg.entity'
 export class MessageService {
     constructor(@InjectRepository(FsmMsg) private fsmMsgRepository: Repository<FsmMsg>) { }
 
-    async findOneById(id: number) {
-        return await this.fsmMsgRepository.findByIds([id])
+    findOneById(id: number) {
+        return this.fsmMsgRepository.findByIds([id])
     }
 
-    async findByKey(key: string) {
-        return await this.fsmMsgRepository.findOneOrFail({ key })
+    findByKey(key: string) {
+        return this.fsmMsgRepository.findOneOrFail({ key })
     }
 
-    async findBySenderAndDocTypeAndDocNumAndDocVer(sender: string, docType: string, docNum: string, docVer: string) {
-        return await this.fsmMsgRepository.find({ where: { sender, docType, docNum, docVer } })
+    findBySenderAndDocTypeAndDocNumAndDocVer(sender: string, docType: string, docNum: string, docVer: string) {
+        return this.fsmMsgRepository.find({ where: { sender, docType, docNum, docVer } })
     }
 
-    async create(msg: FsmMsg) {
-        await this.fsmMsgRepository.save(msg)
+    create(msg: FsmMsg) {
+        return this.fsmMsgRepository.save(msg)
     }
 
+    update(msg: FsmMsg): Promise<FsmMsg> {
+        return this.fsmMsgRepository.save(msg)
+    }
 }
