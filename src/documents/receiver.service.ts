@@ -7,7 +7,11 @@ import { FsmDocReceiver } from 'src/entities/fsm-doc-receiver.entity';
 export class ReceiverService {
     constructor(@InjectRepository(FsmDocReceiver) private fsmDocReceiverRepository: Repository<FsmDocReceiver>) { }
 
-    async getReceivers(fsmDocReceiver: FsmDocReceiver): Promise<FsmDocReceiver[]> {
-        return await this.fsmDocReceiverRepository.find()
+    create(receiver: FsmDocReceiver) {
+        return this.fsmDocReceiverRepository.save(receiver)
     }
+
+    // async getReceivers(fsmDocReceiver: FsmDocReceiver): Promise<FsmDocReceiver[]> {
+    //     return await this.fsmDocReceiverRepository.find()
+    // }
 }

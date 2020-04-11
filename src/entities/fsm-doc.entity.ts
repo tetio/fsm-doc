@@ -1,5 +1,6 @@
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm'
+import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm'
 import { Audit } from './audit.entity'
+import { FsmDocReceiver } from './fsm-doc-receiver.entity'
 
 @Entity({ name: 'fsm_doc' })
 export class FsmDoc extends Audit {
@@ -17,4 +18,7 @@ export class FsmDoc extends Audit {
     sender: string
     @Column()
     state: string
+
+    @OneToMany(type => FsmDocReceiver, receiver => receiver.fsmDoc)
+    receivers: FsmDocReceiver[]
 }

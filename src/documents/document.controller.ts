@@ -1,14 +1,16 @@
 import { Controller, Body, Get, Post, Logger } from '@nestjs/common'
 import { DocumentService } from './document.service'
 import { MessageService } from './message.service'
+import { ReceiverService } from './receiver.service'
 import { MsgNotifyDto } from './msg-notify.dto'
 import { FsmDoc } from 'src/entities/fsm-doc.entity'
 import { FsmMsg } from 'src/entities/fsm-msg.entity'
 import { FsmResultDto } from './fsm-result.dto'
+import { FsmDocReceiver } from 'src/entities/fsm-doc-receiver.entity'
 
 @Controller('document')
 export class DocumentController {
-    constructor(private readonly docSrv: DocumentService, private readonly msgSrv: MessageService) { }
+    constructor(private readonly docSrv: DocumentService, private readonly msgSrv: MessageService, private receiverService: ReceiverService) { }
 
     @Get()
     findAll() {
@@ -18,7 +20,7 @@ export class DocumentController {
     @Post()
     create(@Body() msg: MsgNotifyDto) {
         const docKey = this.makeDocKey(msg.sender, msg.docType, msg.docNum)
-        const internalDoc: FsmDoc = { ...msg, currentDocVer: msg.docVer, key: docKey, state: 'PROCESSING', id: undefined, created_at: undefined, updated_at: undefined }
+        const internalDoc: FsmDoc = { ...msg, currentDocVer: msg.docVer, key: docKey, state: 'PROCESSING', receivers: undefined, id: undefined, created_at: undefined, updated_at: undefined }
         return this.docSrv.create(internalDoc)
     }
 
@@ -76,16 +78,18 @@ export class DocumentController {
         return undefined
     }
 
-    processNewDocument(key: string, msg: FsmMsg): FsmResultDto {
+    async processNewDocument(key: string, msg: FsmMsg): Promise<FsmResultDto> {
         if (msg.msgFunction === MSG_FUNCTION.ORIGINAL) {
-            const doc: FsmDoc = {...msg, id:undefined, key, currentDocVer: msg.docVer}
-            this.docSrv.create(doc)
-             // TODO FsmDocReceiver    
-            return <FsmResultDto>{status: RESULT_STATE.SUCCESS, info: "New document created"}
-        } else if (msg.msgFunction === MSG_FUNCTION.ORIGINAL || msg.msgFunction === MSG_FUNCTION.REPLACEMENT)  {
-            return <FsmResultDto>{status: RESULT_STATE.ON_HOLD, info: "Message it's a replacement or cancellation and no original message has been found. it must be put on hold"}
+            const fsmDoc: FsmDoc = { ...msg, id: undefined, key, currentDocVer: msg.docVer, receivers: undefined }
+            const savedDoc = await this.docSrv.create(fsmDoc)
+            // TODO FsmDocReceiver   
+            const receiver = <FsmDocReceiver>{ fsmDoc: savedDoc, receiver: msg.receiver }
+            await this.receiverService.create(receiver)
+            return <FsmResultDto>{ status: RESULT_STATE.SUCCESS, info: "New document created" }
+        } else if (msg.msgFunction === MSG_FUNCTION.ORIGINAL || msg.msgFunction === MSG_FUNCTION.REPLACEMENT) {
+            return <FsmResultDto>{ status: RESULT_STATE.ON_HOLD, info: "Message it's a replacement or cancellation and no original message has been found. it must be put on hold" }
         }
-        return <FsmResultDto>{status: RESULT_STATE.UNKNOWN_DOCUMENT_FUNCTION, info: "Message function is unknown"}
+        return <FsmResultDto>{ status: RESULT_STATE.UNKNOWN_DOCUMENT_FUNCTION, info: "Message function is unknown" }
     }
 }
 
@@ -102,7 +106,7 @@ enum MSG_STATE {
     CONFIRMED = "CONFIRMED",
     ACKNOWLEDGED = "ACKNOWLEDGED",
     ERROR = "ERROR",
-    ON_HOLD = "ON_HOLD"  
+    ON_HOLD = "ON_HOLD"
 }
 
 enum DOC_STATE {

@@ -17,7 +17,7 @@ import { FsmDocReceiver } from '../entities/fsm-doc-receiver.entity'
   providers: [
     DocumentService,
     MessageService,
-    ReceiverService
+    ReceiverService,
   ],
   controllers: [DocumentController]
 })
