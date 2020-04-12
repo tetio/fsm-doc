@@ -19,6 +19,9 @@ export class DocumentService {
         return this.fsmDocsRepository.save(doc)
     }
 
+    update(doc: FsmDoc) {
+        return this.fsmDocsRepository.save(doc)
+    }
 
     getFsmDocs(fsmDoc: FsmDoc): Promise<FsmDoc[]> {
         return this.fsmDocsRepository.find()

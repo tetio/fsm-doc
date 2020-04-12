@@ -7,6 +7,8 @@ import { FsmDoc } from 'src/entities/fsm-doc.entity'
 import { FsmMsg } from 'src/entities/fsm-msg.entity'
 import { FsmResultDto } from './fsm-result.dto'
 import { FsmDocReceiver } from 'src/entities/fsm-doc-receiver.entity'
+import { timingSafeEqual } from 'crypto'
+import { doc } from 'prettier'
 
 @Controller('document')
 export class DocumentController {
@@ -31,8 +33,9 @@ export class DocumentController {
     }
 
     makeMsgKey = (trackId: string, msgId: string) => `${trackId}###${msgId}`
-
     makeDocKey = (sender: string, docType: string, docNum: string) => `${sender}###${docType}###${docNum}`
+    makeResult= (status: string, info: string): Promise<FsmResultDto> => new Promise<FsmResultDto>((resolve, reject) => resolve(<FsmResultDto>{ status , info}))
+    thereIsResponse= (state: string): Boolean => (state === DOC_STATE.ACCEPTED || state === DOC_STATE.REJECTED)
 
     async getFsmMsg(msgPayload: MsgNotifyDto): Promise<FsmMsg> {
         const msgKey = this.makeMsgKey(msgPayload.trackId, msgPayload.msgNum)
@@ -75,15 +78,49 @@ export class DocumentController {
 
 
     processDocument(key: string, msg: FsmMsg, doc: FsmDoc): Promise<FsmResultDto> {
-        return undefined
+        if (msg.docVer < doc.currentDocVer) {
+            return this.makeResult(RESULT_STATE.OUT_OF_SEQUENCE, "Message references an older version of the document")
+        } else if (msg.docVer === doc.currentDocVer) {
+            if (this.thereIsResponse(doc.state)) {
+                return this.makeResult(RESULT_STATE.ERROR,"There is already a response for this version of the document")
+            } else if (doc.receivers.filter(r => r.receiver === msg.receiver).length === 0) {
+                const newReceiver = <FsmDocReceiver>{fsmDoc: doc, receiver: msg.receiver}
+                this.receiverService.add(newReceiver)
+                return this.makeResult(RESULT_STATE.SUCCESS, "Already existing message but for another receiver")
+            } else if (msg.reprocessed) {
+                doc.state = DOC_STATE.PROCESSING
+                this.docSrv.update(doc)
+            } else {
+                this.makeResult(RESULT_STATE.ERROR, "Message with  existing key ans it's not being reprocessed. CHECK THIS CASE.")
+            }
+        } else {
+            if (msg.msgFunction === MSG_FUNCTION.ORIGINAL) {
+                return this.makeResult(RESULT_STATE.OUT_OF_SEQUENCE, "Already existing document. Message with an original is not allowed")
+            } else if (doc.state === DOC_STATE.REJECTED) {
+                return this.makeResult(RESULT_STATE.OUT_OF_SEQUENCE, "Document already rejected")
+            } else if (doc.state === DOC_STATE.PROCESSING) {
+                const updatedMsg = <FsmMsg>{...msg, state: MSG_STATE.ON_HOLD}
+                this.msgSrv.update(updatedMsg)
+                return this.makeResult(RESULT_STATE.OUT_OF_SEQUENCE, "A previous version of the document is still processing")
+            } else {
+                //lets update the doc with the new version
+                const updatedDoc = <FsmDoc>{...doc, currentDocVer: msg.docVer}
+                this.receiverService.deleteByDocId(doc.id)
+                const receiver = <FsmDocReceiver>{fsmDoc: doc, receiver: msg.receiver}
+                this.receiverService.create(receiver)
+                this.makeResult(RESULT_STATE.SUCCESS, "Update document with new version and carry on with msg processing")
+            }
+        }
     }
+
+
+
 
     async processNewDocument(key: string, msg: FsmMsg): Promise<FsmResultDto> {
         if (msg.msgFunction === MSG_FUNCTION.ORIGINAL) {
-            const fsmDoc: FsmDoc = { ...msg, id: undefined, key, currentDocVer: msg.docVer, receivers: undefined }
-            const savedDoc = await this.docSrv.create(fsmDoc)
-            // TODO FsmDocReceiver   
-            const receiver = <FsmDocReceiver>{ fsmDoc: savedDoc, receiver: msg.receiver }
+            const aDoc: FsmDoc = { ...msg, id: undefined, key, currentDocVer: msg.docVer, receivers: undefined }
+            const fsmDoc = await this.docSrv.create(aDoc)
+            const receiver = <FsmDocReceiver>{ fsmDoc, receiver: msg.receiver }
             await this.receiverService.create(receiver)
             return <FsmResultDto>{ status: RESULT_STATE.SUCCESS, info: "New document created" }
         } else if (msg.msgFunction === MSG_FUNCTION.ORIGINAL || msg.msgFunction === MSG_FUNCTION.REPLACEMENT) {
