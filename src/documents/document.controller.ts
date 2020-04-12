@@ -6,11 +6,11 @@ import { MsgNotifyDto } from './msg-notify.dto'
 import { FsmDoc } from 'src/entities/fsm-doc.entity'
 import { FsmMsg } from 'src/entities/fsm-msg.entity'
 import { FsmResultDto } from './fsm-result.dto'
+import { MsgDeliverDto } from './msg-deliver.dto'
 import { FsmDocReceiver } from 'src/entities/fsm-doc-receiver.entity'
-import { timingSafeEqual } from 'crypto'
-import { doc } from 'prettier'
+import { disconnect } from 'cluster'
 
-@Controller('document')
+@Controller()
 export class DocumentController {
     constructor(private readonly docSrv: DocumentService, private readonly msgSrv: MessageService, private receiverService: ReceiverService) { }
 
@@ -26,16 +26,37 @@ export class DocumentController {
         return this.docSrv.create(internalDoc)
     }
 
-    @Post('/notify')
+    @Post('/msg/notify')
     async notify(@Body() msgDto: MsgNotifyDto) {
         const msg = await this.getFsmMsg(msgDto)
         return this.prepareNotify(msg)
     }
 
+    @Post('/msg/deliver')
+    async deliver(@Body() msgDto: MsgDeliverDto) {
+        const msgKey = this.makeMsgKey(msgDto.trackId, msgDto.msgNum)
+        return this.msgSrv.findByKey(msgKey).then(
+            async (msg: FsmMsg) => {
+                const docKey = this.makeDocKey(msg.sender, msg.docType, msg.docNum)
+                const result: FsmResultDto = await this.docSrv.findByKey(docKey).then(
+                    (doc: FsmDoc) => {
+                        return this.processDeliver(msg, doc, msgKey, docKey)
+                    },
+                    (error: any) => {
+                        return this.makeResult(RESULT_STATE.ERROR, `deliver: No document found, msgKey=[${msgKey}], docKey=[${docKey}]`)
+                    }
+                )
+                return result;
+            },
+            (error: any) => {
+                return this.makeResult(RESULT_STATE.ERROR, `deliver: No message found key=[${msgKey}]`)
+            }
+        )
+    }
     makeMsgKey = (trackId: string, msgId: string) => `${trackId}###${msgId}`
     makeDocKey = (sender: string, docType: string, docNum: string) => `${sender}###${docType}###${docNum}`
-    makeResult= (status: string, info: string): Promise<FsmResultDto> => new Promise<FsmResultDto>((resolve, reject) => resolve(<FsmResultDto>{ status , info}))
-    thereIsResponse= (state: string): Boolean => (state === DOC_STATE.ACCEPTED || state === DOC_STATE.REJECTED)
+    makeResult = (status: string, info: string): Promise<FsmResultDto> => new Promise<FsmResultDto>((resolve, reject) => resolve(<FsmResultDto>{ status, info }))
+    thereIsResponse = (state: string): Boolean => (state === DOC_STATE.ACCEPTED || state === DOC_STATE.REJECTED)
 
     async getFsmMsg(msgPayload: MsgNotifyDto): Promise<FsmMsg> {
         const msgKey = this.makeMsgKey(msgPayload.trackId, msgPayload.msgNum)
@@ -82,9 +103,9 @@ export class DocumentController {
             return this.makeResult(RESULT_STATE.OUT_OF_SEQUENCE, "Message references an older version of the document")
         } else if (msg.docVer === doc.currentDocVer) {
             if (this.thereIsResponse(doc.state)) {
-                return this.makeResult(RESULT_STATE.ERROR,"There is already a response for this version of the document")
+                return this.makeResult(RESULT_STATE.ERROR, "There is already a response for this version of the document")
             } else if (doc.receivers.filter(r => r.receiver === msg.receiver).length === 0) {
-                const newReceiver = <FsmDocReceiver>{fsmDoc: doc, receiver: msg.receiver}
+                const newReceiver = <FsmDocReceiver>{ fsmDoc: doc, receiver: msg.receiver }
                 this.receiverService.add(newReceiver)
                 return this.makeResult(RESULT_STATE.SUCCESS, "Already existing message but for another receiver")
             } else if (msg.reprocessed) {
@@ -99,14 +120,14 @@ export class DocumentController {
             } else if (doc.state === DOC_STATE.REJECTED) {
                 return this.makeResult(RESULT_STATE.OUT_OF_SEQUENCE, "Document already rejected")
             } else if (doc.state === DOC_STATE.PROCESSING) {
-                const updatedMsg = <FsmMsg>{...msg, state: MSG_STATE.ON_HOLD}
+                const updatedMsg = <FsmMsg>{ ...msg, state: MSG_STATE.ON_HOLD }
                 this.msgSrv.update(updatedMsg)
                 return this.makeResult(RESULT_STATE.OUT_OF_SEQUENCE, "A previous version of the document is still processing")
             } else {
                 //lets update the doc with the new version
-                const updatedDoc = <FsmDoc>{...doc, currentDocVer: msg.docVer}
+                const updatedDoc = <FsmDoc>{ ...doc, currentDocVer: msg.docVer }
                 this.receiverService.deleteByDocId(doc.id)
-                const receiver = <FsmDocReceiver>{fsmDoc: doc, receiver: msg.receiver}
+                const receiver = <FsmDocReceiver>{ fsmDoc: doc, receiver: msg.receiver }
                 this.receiverService.create(receiver)
                 this.makeResult(RESULT_STATE.SUCCESS, "Update document with new version and carry on with msg processing")
             }
@@ -122,11 +143,36 @@ export class DocumentController {
             const fsmDoc = await this.docSrv.create(aDoc)
             const receiver = <FsmDocReceiver>{ fsmDoc, receiver: msg.receiver }
             await this.receiverService.create(receiver)
-            return <FsmResultDto>{ status: RESULT_STATE.SUCCESS, info: "New document created" }
+            return this.makeResult(RESULT_STATE.SUCCESS, "New document created")
         } else if (msg.msgFunction === MSG_FUNCTION.ORIGINAL || msg.msgFunction === MSG_FUNCTION.REPLACEMENT) {
-            return <FsmResultDto>{ status: RESULT_STATE.ON_HOLD, info: "Message it's a replacement or cancellation and no original message has been found. it must be put on hold" }
+            return this.makeResult(RESULT_STATE.ON_HOLD, "Message it's a replacement or cancellation and no original message has been found. it must be put on hold")
         }
-        return <FsmResultDto>{ status: RESULT_STATE.UNKNOWN_DOCUMENT_FUNCTION, info: "Message function is unknown" }
+        return this.makeResult(RESULT_STATE.UNKNOWN_DOCUMENT_FUNCTION, "Message function is unknown")
+    }
+
+    processDeliver(msg: FsmMsg, doc: FsmDoc, msgKey: string, docKey: string): Promise<FsmResultDto> {
+        if (msg.state === MSG_STATE.ON_HOLD) {
+            return this.makeResult(RESULT_STATE.ERROR, `deliver: Message [${msgKey}] is ON HOLD, can't be processed`)
+        }
+        const aMsg = <FsmMsg>{ ...msg, state: MSG_STATE.DELIVERED }
+        this.msgSrv.update(aMsg)
+        if (msg.docVer === doc.currentDocVer) {
+            if (doc.state === DOC_STATE.PROCESSING || doc.state === DOC_STATE.ERROR) {
+                const aDoc = <FsmDoc>{ ...doc, state: DOC_STATE.DELIVERED }
+                this.docSrv.update(aDoc)
+                return this.makeResult(RESULT_STATE.SUCCESS, `deliver: Message [${msgKey}] and Document [${docKey}] updated `)
+            } else {
+                return this.makeResult(RESULT_STATE.SUCCESS, `deliver: Only message [${msgKey}] is updated`)
+            }
+        } else if (msg.docVer > doc.currentDocVer) {
+            const aDoc = <FsmDoc>{ ...doc, state: DOC_STATE.DELIVERED, currentDocVer: msg.docVer }
+            this.docSrv.update(aDoc)
+            return this.makeResult(RESULT_STATE.SUCCESS, `deliver: Message [${msgKey}] and Document [${docKey}] updated and version too.`)
+        } else {
+
+            return this.makeResult(RESULT_STATE.SUCCESS, `deliver: Only message [${msgKey}] is updated, version as older then current version`)
+        }
+
     }
 }
 
