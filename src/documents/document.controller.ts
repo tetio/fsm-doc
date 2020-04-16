@@ -29,7 +29,7 @@ export class DocumentController {
     @Post('/msg/notify')
     async notify(@Body() msgDto: MsgNotifyDto) {
         const msg = await this.getFsmMsg(msgDto)
-        return this.prepareNotify(msg)
+        return this.processNotify(msg)
     }
 
     @Post('/msg/deliver')
@@ -53,6 +53,7 @@ export class DocumentController {
             }
         )
     }
+
     makeMsgKey = (trackId: string, msgId: string) => `${trackId}###${msgId}`
     makeDocKey = (sender: string, docType: string, docNum: string) => `${sender}###${docType}###${docNum}`
     makeResult = (status: string, info: string): Promise<FsmResultDto> => new Promise<FsmResultDto>((resolve, reject) => resolve(<FsmResultDto>{ status, info }))
@@ -73,7 +74,7 @@ export class DocumentController {
         }
     }
 
-    async prepareNotify(msg: FsmMsg): Promise<FsmResultDto> {
+    async processNotify(msg: FsmMsg): Promise<FsmResultDto> {
         try {
             return await this.prepareDocument(msg)
         } catch (error) {
@@ -82,7 +83,7 @@ export class DocumentController {
             // Race condition, no doc existed and at least two messages tried to create the new document simultaneously
             const s = JSON.stringify(error)
             if (s.includes("duplicate key")) {
-                this.prepareNotify(msg)
+                this.processNotify(msg)
             }
         }
     }
